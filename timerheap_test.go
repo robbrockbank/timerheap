@@ -53,7 +53,7 @@ var _ = Describe("timer heap tests", func() {
 			for i := 0; i < len(td); i++ {
 				td[i] = testdata{
 					index: i,
-					pop:   now.Add(initialPause + (interval * time.Duration(i+1))),
+					pop:   now.Add(interval * time.Duration(i+1)),
 				}
 			}
 
@@ -127,6 +127,75 @@ var _ = Describe("timer heap tests", func() {
 				Expect(t.index).To(Equal(i))
 			}
 		})
+
+		It("can requeue a pending timer if an earlier event is added (earlier than next in queue)", func() {
+			var value interface{}
+
+			By("adding two future events")
+			th.PushEvent(time.Second, testdata{
+				index: 1, pop: time.Now(),
+			})
+			th.PushEvent(time.Second, testdata{
+				index: 1, pop: time.Now(),
+			})
+
+			By("Pausing for the timer to start but not to pop")
+			time.Sleep(100 * time.Millisecond)
+
+			By("adding an event that will expire sooner")
+			th.PushEvent(1 * time.Millisecond, testdata{
+				index: 2000, pop: time.Now(),
+			})
+
+			By("Waiting checking the order of the events")
+			Eventually(th.TimedEvent(), "1s", "10ms").Should(Receive(&value))
+			Expect(value).NotTo(BeNil())
+			t, ok := value.(testdata)
+			Expect(ok).To(BeTrue())
+			Expect(t.index).To(Equal(2000))
+
+			Eventually(th.TimedEvent(), "3s", "10ms").Should(Receive(&value))
+			Expect(value).NotTo(BeNil())
+			t, ok = value.(testdata)
+			Expect(ok).To(BeTrue())
+			Expect(t.index).To(Equal(1))
+
+			Eventually(th.TimedEvent(), "3s", "10ms").Should(Receive(&value))
+			Expect(value).NotTo(BeNil())
+			t, ok = value.(testdata)
+			Expect(ok).To(BeTrue())
+			Expect(t.index).To(Equal(1))
+		})
+
+		It("can requeue a pending timer if an earlier event is added (no next in queue)", func() {
+			var value interface{}
+
+			By("adding one future events")
+			th.PushEvent(time.Second, testdata{
+				index: 1, pop: time.Now(),
+			})
+
+			By("Pausing for the timer to start but not to pop")
+			time.Sleep(500 * time.Millisecond)
+
+			By("adding an event that will expire sooner")
+			th.PushEvent(0, testdata{
+				index: 2000, pop: time.Now(),
+			})
+
+			By("Waiting checking the order of the events")
+			Eventually(th.TimedEvent(), "1s", "10ms").Should(Receive(&value))
+			Expect(value).NotTo(BeNil())
+			t, ok := value.(testdata)
+			Expect(ok).To(BeTrue())
+			Expect(t.index).To(Equal(2000))
+
+			Eventually(th.TimedEvent(), "1s", "10ms").Should(Receive(&value))
+			Expect(value).NotTo(BeNil())
+			t, ok = value.(testdata)
+			Expect(ok).To(BeTrue())
+			Expect(t.index).To(Equal(1))
+		})
 	})
 
 	Context("termination processing", func() {
@@ -156,6 +225,32 @@ var _ = Describe("timer heap tests", func() {
 					index: i, pop: time.Now(),
 				})
 			}
+
+			By("Terminating the timer")
+			th.Terminate()
+		})
+
+		It("can terminate before receiving a future event that hasn't popped yet", func() {
+			By("adding a set of immediate events")
+			th.PushEvent(time.Second, testdata{
+				index: 1, pop: time.Now(),
+			})
+
+			By("Pausing for the timer to start, but not to pop")
+			time.Sleep(500 * time.Millisecond)
+
+			By("Terminating the timer")
+			th.Terminate()
+		})
+
+		It("can terminate before receiving a future event that hasn't popped yet", func() {
+			By("adding a set of immediate events")
+			th.PushEvent(500 * time.Millisecond, testdata{
+				index: 1, pop: time.Now(),
+			})
+
+			By("Pausing for the timer to start and to pop")
+			time.Sleep(time.Second)
 
 			By("Terminating the timer")
 			th.Terminate()

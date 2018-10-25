@@ -157,12 +157,13 @@ func (h *timedItemHeap) Pop() interface{} {
 	return x
 }
 
-// peek is used to look at the first entry that would be popped off the heap.
+// peek is used to look at the first entry that would be popped off the heap (which is
+// the first element in the slice).
 func (h *timedItemHeap) peek() *timedItem {
 	c := *h
 	n := len(c)
 	if n == 0 {
 		return nil
 	}
-	return &c[n-1]
+	return &c[0]
 }
