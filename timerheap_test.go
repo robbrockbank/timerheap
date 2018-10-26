@@ -196,6 +196,28 @@ var _ = Describe("timer heap tests", func() {
 			Expect(ok).To(BeTrue())
 			Expect(t.index).To(Equal(1))
 		})
+
+		It("wakes up and processes an event after a period of no events", func() {
+			var value interface{}
+
+			By("Pausing to ensure we're waiting for an event to be added")
+			time.Sleep(500 * time.Millisecond)
+
+			By("adding a future event")
+			th.PushEvent(10 * time.Millisecond, testdata{
+				index: 1, pop: time.Now(),
+			})
+
+			By("Pausing for the timer to pop")
+			time.Sleep(50 * time.Millisecond)
+
+			By("Checking we get the event")
+			Eventually(th.TimedEvent(), "3s", "10ms").Should(Receive(&value))
+			Expect(value).NotTo(BeNil())
+			t, ok := value.(testdata)
+			Expect(ok).To(BeTrue())
+			Expect(t.index).To(Equal(1))
+		})
 	})
 
 	Context("termination processing", func() {

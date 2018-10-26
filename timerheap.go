@@ -45,9 +45,8 @@ func (t *timerHeap) PushEvent(popAfter time.Duration, value interface{}) {
 		value:  value,
 	}
 	if next := t.valueHeap.peek(); next == nil || ti.expire.Before(next.expire) {
-		// This new item is either the first to be added, or is before the first one in the
-		// heap. Send a wakeup to either trigger a timer, or to allow us to recheck if the
-		// current timer is still the correct one to be waiting on.
+		// This new item is either the first to be added, or expires before the first one in the
+		// heap. Send a wakeup to trigger the timer thread to recheck.
 		select {
 		case t.wakeup <- struct{}{}:
 			// Wakeup sent.
@@ -89,9 +88,12 @@ waitforitem:
 			}
 		}
 
+		// Determine how long we need to wait for this item to expire.
 		tiv := ti.(timedItem)
 		wait := tiv.expire.Sub(time.Now())
 
+		// If this item has expired, then send immediately rather than going to the extremes
+		// of creating a timer with a negative duration.
 		if wait <= 0 {
 			select {
 			case t.results <- tiv.value:
@@ -100,21 +102,28 @@ waitforitem:
 				return
 			}
 		}
+
+		// The event expires in the future, so use a channel based timer to wait for the event - this
+		// makes it easy to cancel if the timerheap is terminated, or a new event has been added which
+		// may have a closer expiration time.
 		tm := time.NewTimer(wait)
 
 	waitfortimer:
 		for {
 			select {
 			case <-t.exit:
+				tm.Stop()
 				return
 			case <-t.wakeup:
 				// Woken up, must have an item that potentially has a expire time less than ours.
 				t.lock.Lock()
 				if next := t.valueHeap.peek(); next != nil && next.expire.Before(tiv.expire) {
 					// The next entry on the heap is before the one we were waiting on. Add it
-					// back to the heap and reloop to pull the next item.
+					// back to the heap, cancel it's timer and reloop to pull the next item
+					// which will have a closer expiration.
 					heap.Push(&t.valueHeap, tiv)
 					t.lock.Unlock()
+					tm.Stop()
 					continue waitforitem
 				}
 				t.lock.Unlock()
@@ -143,12 +152,12 @@ func (h timedItemHeap) Len() int           { return len(h) }
 func (h timedItemHeap) Less(i, j int) bool { return h[i].expire.Before(h[j].expire) }
 func (h timedItemHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 
+// As per heap.Interface, Push appends an item after the last index.
 func (h *timedItemHeap) Push(x interface{}) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
 	*h = append(*h, x.(timedItem))
 }
 
+// As per heap.Interface, Pop removes the item at index 0.
 func (h *timedItemHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
@@ -159,11 +168,12 @@ func (h *timedItemHeap) Pop() interface{} {
 
 // peek is used to look at the first entry that would be popped off the heap (which is
 // the first element in the slice).
+//
+// This uses knowledge (as defined by the heap.Pop(), that Pop is equivalent to Remove(h, 0).
 func (h *timedItemHeap) peek() *timedItem {
-	c := *h
-	n := len(c)
-	if n == 0 {
+	if h.Len() == 0 {
 		return nil
 	}
+	c := *h
 	return &c[0]
 }
